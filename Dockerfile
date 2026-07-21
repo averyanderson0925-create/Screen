@@ -1,6 +1,35 @@
 # Multi-stage Dockerfile for Remote Desktop Monitoring System
 
-# Stage 1: Server
+# Stage 1: Client (Linux clients only; Windows clients run natively)
+FROM python:3.13-slim AS client
+
+WORKDIR /app
+
+# Install system dependencies for screen capture
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libx11-dev \
+    libxtst-dev \
+    libpng-dev \
+    libjpeg-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy client code
+COPY client/ ./client/
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Run client (example)
+# CMD ["python", "-m", "client.agent", "--server", "ws://server:8000/ws"]
+
+# Stage 2: Server (final stage — deployed by Railway)
 FROM python:3.13-slim AS server
 
 WORKDIR /app
@@ -37,33 +66,3 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 # Run server
 CMD ["python", "-m", "server.main"]
-
-# Stage 2: Client (Windows-specific, for reference)
-# Note: This stage is for Linux clients only. Windows clients should run natively.
-FROM python:3.13-slim AS client
-
-WORKDIR /app
-
-# Install system dependencies for screen capture
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    libx11-dev \
-    libxtst-dev \
-    libpng-dev \
-    libjpeg-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy client code
-COPY client/ ./client/
-
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-
-# Run client (example)
-# CMD ["python", "-m", "client.agent", "--server", "ws://server:8000/ws"]

@@ -48,7 +48,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy server code
 COPY server/ ./server/
 COPY templates/ ./templates/
-COPY static/ ./static/
 
 # Create directories for data
 RUN mkdir -p /app/data /app/logs

@@ -5,6 +5,7 @@ Provides HTTP endpoints for managing computers and retrieving data.
 
 from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 import logging
@@ -13,6 +14,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 security = HTTPBearer()
+
+
+class CommandRequest(BaseModel):
+    """Model for sending commands to computers."""
+    command: str
+    params: Optional[dict] = None
 
 
 # Simple JWT verification (in production, use proper JWT library)
@@ -214,8 +221,7 @@ async def get_frames(
 @router.post("/api/computers/{computer_id}/command")
 async def send_command(
     computer_id: int,
-    command: str,
-    params: Optional[dict] = None,
+    request: CommandRequest,
     manager = Depends(get_connection_manager),
     token: str = Depends(verify_token)
 ):
@@ -224,8 +230,7 @@ async def send_command(
     
     Args:
         computer_id: Computer ID
-        command: Command to send
-        params: Optional command parameters
+        request: Command request with command and optional params
         manager: Connection manager
         token: Auth token
         
@@ -236,9 +241,9 @@ async def send_command(
         if not manager.is_client_connected(computer_id):
             raise HTTPException(status_code=404, detail="Computer not connected")
         
-        await manager.send_command_to_client(computer_id, command, **(params or {}))
+        await manager.send_command_to_client(computer_id, request.command, **(request.params or {}))
         
-        return {"status": "sent", "computer_id": computer_id, "command": command}
+        return {"status": "sent", "computer_id": computer_id, "command": request.command}
     except HTTPException:
         raise
     except Exception as e:

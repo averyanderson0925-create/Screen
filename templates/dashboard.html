@@ -375,6 +375,31 @@
             requestAnimationFrame(renderLoop);
         }
         
+        async function sendStopCommand() {
+            if (!selectedComputerId) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/computers/${selectedComputerId}/command`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({
+                        command: 'stop'
+                    })
+                });
+
+                if (!response.ok) {
+                    console.error('Unable to stop monitoring agent');
+                }
+            } catch (error) {
+                console.error('Stop command error:', error);
+            }
+        }
+
         // Setup button handlers
         function setupButtonHandlers() {
             // Fullscreen
@@ -403,7 +428,8 @@
             });
             
             // Stop
-            stopBtn.addEventListener('click', () => {
+            stopBtn.addEventListener('click', async () => {
+                await sendStopCommand();
                 selectedComputerId = null;
                 selectedComputer = null;
                 screenCanvas.classList.add('hidden');
@@ -887,7 +913,8 @@
             pauseBtn.classList.remove('hidden');
         });
         
-        stopBtn.addEventListener('click', () => {
+        stopBtn.addEventListener('click', async () => {
+            await sendStopCommand();
             selectedComputerId = null;
             selectedComputerName.textContent = 'Select a computer';
             connectionStatus.classList.add('hidden');

@@ -9,6 +9,34 @@ import json
 import time
 from typing import Optional, Callable, Dict, Any
 import threading
+from urllib.parse import urlparse, urlunparse
+
+
+def normalize_server_url(server_url: str) -> str:
+    """Normalize an HTTP(S) URL into a WebSocket URL for the client endpoint."""
+    if not server_url:
+        return server_url
+
+    parsed = urlparse(server_url)
+    if parsed.scheme not in {"http", "https", "ws", "wss"}:
+        return server_url
+
+    if parsed.scheme in {"http", "https"}:
+        ws_scheme = "wss" if parsed.scheme == "https" else "ws"
+        path = parsed.path or "/"
+        if path in {"", "/"}:
+            path = "/ws"
+        elif path.endswith("/ws") or path.endswith("/ws/"):
+            path = path.rstrip("/") or "/ws"
+        else:
+            path = path
+
+        return urlunparse((ws_scheme, parsed.netloc, path, parsed.params, parsed.query, parsed.fragment))
+
+    if parsed.path in {"", "/"}:
+        return urlunparse((parsed.scheme, parsed.netloc, "/ws", parsed.params, parsed.query, parsed.fragment))
+
+    return server_url
 
 
 class WebSocketClient:
@@ -32,7 +60,7 @@ class WebSocketClient:
             heartbeat_interval: Heartbeat interval in seconds
             reconnect_delay: Delay between reconnection attempts
         """
-        self.server_url = server_url
+        self.server_url = normalize_server_url(server_url)
         self.device_info = device_info
         self.heartbeat_interval = heartbeat_interval
         self.reconnect_delay = reconnect_delay
@@ -49,6 +77,7 @@ class WebSocketClient:
         self.on_connected: Optional[Callable] = None
         self.on_disconnected: Optional[Callable] = None
         self.on_error: Optional[Callable] = None
+        self.on_command: Optional[Callable[[str, Dict[str, Any]], None]] = None
         
         # Statistics
         self.bytes_sent = 0
@@ -148,7 +177,10 @@ class WebSocketClient:
                 if msg_type == "command":
                     # Handle server commands
                     command = data.get("command")
+                    params = data.get("params", {})
                     print(f"Received command: {command}")
+                    if self.on_command:
+                        self.on_command(command, params)
                     
                 elif msg_type == "config":
                     # Handle configuration updates

